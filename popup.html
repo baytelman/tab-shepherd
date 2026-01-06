@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <span class="logo">&#x1F411;</span>
+      <span class="title">Tab Shepherd</span>
+      <label class="toggle">
+        <input type="checkbox" id="enableToggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="section">
+      <label class="label">This window:</label>
+      <select id="windowGroup" class="select">
+        <option value="">(unassigned)</option>
+      </select>
+    </div>
+
+    <div class="section" id="noGroupsMessage" style="display: none;">
+      <p class="hint">No groups configured yet. Click Options to create groups.</p>
+    </div>
+
+    <div class="actions">
+      <button id="sortAllBtn" class="btn btn-primary">
+        <span>&#x21bb;</span> Sort All Tabs
+      </button>
+      <button id="optionsBtn" class="btn btn-secondary">
+        <span>&#x2699;</span> Options
+      </button>
+    </div>
+
+    <div id="status" class="status" style="display: none;"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

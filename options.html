@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Tab Shepherd - Options</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="header-left">
+        <span class="logo">&#x1F411;</span>
+        <h1>Tab Shepherd</h1>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="enableToggle">
+        <span class="slider"></span>
+        <span class="toggle-label">Enabled</span>
+      </label>
+    </header>
+
+    <main class="main">
+      <section class="section">
+        <div class="section-header">
+          <h2>Window Groups</h2>
+          <p class="hint">Drag to reorder priority. First matching pattern wins.</p>
+        </div>
+
+        <table class="groups-table" id="groupsTable">
+          <thead>
+            <tr>
+              <th class="col-drag"></th>
+              <th class="col-group">Group &amp; Patterns</th>
+              <th class="col-window">Assigned Window</th>
+              <th class="col-actions"></th>
+            </tr>
+          </thead>
+          <tbody id="groupsTableBody">
+            <!-- Groups will be populated here -->
+          </tbody>
+        </table>
+
+        <div class="table-actions">
+          <button id="addGroupBtn" class="btn btn-add">
+            <span>+</span> Add Group
+          </button>
+          <button id="refreshWindowsBtn" class="btn btn-secondary">
+            <span>&#x21bb;</span> Refresh Windows
+          </button>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <h2>Catch-All Window</h2>
+          <p class="hint">Optionally route unmatched tabs to a default window.</p>
+        </div>
+
+        <select id="catchAllSelect" class="select">
+          <option value="">(none - leave unmatched tabs)</option>
+        </select>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <h2>Import / Export</h2>
+          <p class="hint">Backup or share your configuration.</p>
+        </div>
+
+        <div class="import-export">
+          <button id="exportBtn" class="btn btn-secondary">
+            <span>&#x2193;</span> Export Config
+          </button>
+          <button id="importBtn" class="btn btn-secondary">
+            <span>&#x2191;</span> Import Config
+          </button>
+          <input type="file" id="importFile" accept=".json" style="display: none;">
+        </div>
+      </section>
+    </main>
+
+    <div id="status" class="status" style="display: none;"></div>
+  </div>
+
+  <!-- Group Edit Modal -->
+  <div id="groupModal" class="modal" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modalTitle">Add Group</h3>
+        <button id="modalCloseBtn" class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Group Name</label>
+          <input type="text" id="groupNameInput" placeholder="e.g., work, github, docs">
+        </div>
+        <div class="form-group">
+          <label>URL Patterns (one per line, regex supported)</label>
+          <textarea id="groupPatternsInput" rows="5" placeholder="github\.com&#10;localhost:3000&#10;\?project=myapp"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="modalCancelBtn" class="btn btn-secondary">Cancel</button>
+        <button id="modalSaveBtn" class="btn btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

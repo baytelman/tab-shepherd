@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Generate Tab Shepherd Icons</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      padding: 40px;
+      text-align: center;
+    }
+    h1 { margin-bottom: 20px; }
+    .icons { display: flex; gap: 20px; justify-content: center; margin: 20px 0; }
+    .icon-preview { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+    canvas { border: 1px solid #ddd; border-radius: 8px; }
+    button {
+      padding: 12px 24px;
+      font-size: 16px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    button:hover { background: #43A047; }
+    .instructions {
+      max-width: 500px;
+      margin: 30px auto;
+      text-align: left;
+      background: #f5f5f5;
+      padding: 20px;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Tab Shepherd Icon Generator</h1>
+  <p>Click the button to generate and download all icon sizes.</p>
+
+  <div class="icons" id="previews"></div>
+
+  <button onclick="downloadAll()">Download All Icons</button>
+
+  <div class="instructions">
+    <strong>After downloading:</strong>
+    <ol>
+      <li>Move all PNG files to the <code>icons/</code> folder</li>
+      <li>Reload the extension in Chrome</li>
+    </ol>
+  </div>
+
+  <script>
+    const sizes = [16, 32, 48, 128];
+    const canvases = {};
+
+    function drawIcon(canvas, size) {
+      const ctx = canvas.getContext('2d');
+      const scale = size / 128;
+
+      // Background
+      ctx.fillStyle = '#4CAF50';
+      ctx.beginPath();
+      ctx.roundRect(0, 0, size, size, size * 0.15);
+      ctx.fill();
+
+      // Sheep body (white ellipse)
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.ellipse(size * 0.5, size * 0.55, size * 0.32, size * 0.25, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Sheep head
+      ctx.beginPath();
+      ctx.ellipse(size * 0.35, size * 0.42, size * 0.15, size * 0.13, -0.3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Ears
+      ctx.fillStyle = '#E0E0E0';
+      ctx.beginPath();
+      ctx.ellipse(size * 0.22, size * 0.35, size * 0.06, size * 0.04, -0.8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(size * 0.28, size * 0.30, size * 0.06, size * 0.04, -0.3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Face
+      ctx.fillStyle = '#333333';
+      // Eyes
+      ctx.beginPath();
+      ctx.arc(size * 0.32, size * 0.40, size * 0.025, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(size * 0.40, size * 0.38, size * 0.025, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Nose
+      ctx.beginPath();
+      ctx.ellipse(size * 0.33, size * 0.47, size * 0.03, size * 0.02, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Legs
+      ctx.fillStyle = '#333333';
+      ctx.fillRect(size * 0.35, size * 0.72, size * 0.06, size * 0.15);
+      ctx.fillRect(size * 0.55, size * 0.72, size * 0.06, size * 0.15);
+
+      // Fluffy wool texture (small circles)
+      ctx.fillStyle = '#F5F5F5';
+      const woolPositions = [
+        [0.45, 0.40], [0.55, 0.42], [0.65, 0.45],
+        [0.42, 0.50], [0.58, 0.52], [0.70, 0.55],
+        [0.38, 0.60], [0.50, 0.62], [0.62, 0.60],
+        [0.75, 0.58]
+      ];
+      for (const [x, y] of woolPositions) {
+        ctx.beginPath();
+        ctx.arc(size * x, size * y, size * 0.05, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Generate previews
+    const previewsDiv = document.getElementById('previews');
+    for (const size of sizes) {
+      const div = document.createElement('div');
+      div.className = 'icon-preview';
+
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      canvases[size] = canvas;
+      drawIcon(canvas, size);
+
+      const label = document.createElement('span');
+      label.textContent = `${size}x${size}`;
+
+      div.appendChild(canvas);
+      div.appendChild(label);
+      previewsDiv.appendChild(div);
+    }
+
+    function downloadAll() {
+      for (const size of sizes) {
+        const canvas = canvases[size];
+        const link = document.createElement('a');
+        link.download = `icon${size}.png`;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+      }
+    }
+  </script>
+</body>
+</html>

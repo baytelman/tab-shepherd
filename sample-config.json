@@ -1,0 +1,30 @@
+{
+  "enabled": true,
+  "groups": [
+    {
+      "name": "artemis-dev",
+      "patterns": [
+        "localhost:300[4-6]",
+        "\\?window=artemis-4"
+      ],
+      "priority": 0
+    },
+    {
+      "name": "github",
+      "patterns": [
+        "github\\.com"
+      ],
+      "priority": 1
+    },
+    {
+      "name": "docs",
+      "patterns": [
+        "notion\\.so",
+        "linear\\.app",
+        "docs\\.google\\.com"
+      ],
+      "priority": 2
+    }
+  ],
+  "catchAllGroupName": null
+}
