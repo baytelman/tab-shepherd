@@ -54,12 +54,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderGroupsTable();
   }
 
-  function truncateUrl(url, maxLen = 40) {
-    if (!url || url === '(empty)') return '(empty)';
-    // Remove protocol
-    url = url.replace(/^https?:\/\//, '');
-    if (url.length <= maxLen) return url;
-    return url.substring(0, maxLen - 3) + '...';
+  function truncate(str, maxLen = 35) {
+    if (!str || str === '(empty)' || str === '(no tabs)') return str;
+    if (str.length <= maxLen) return str;
+    return str.substring(0, maxLen - 3) + '...';
+  }
+
+  function getWindowLabel(w) {
+    // Prefer title, fall back to URL
+    if (w.firstTabTitle && w.firstTabTitle !== '(no tabs)') {
+      return `${truncate(w.firstTabTitle)} (${w.tabCount} tabs)`;
+    }
+    // Fall back to URL without protocol
+    const url = (w.firstTabUrl || '').replace(/^https?:\/\//, '');
+    return `${truncate(url)} (${w.tabCount} tabs)`;
   }
 
   function escapeHtml(str) {
@@ -87,8 +95,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Build window options HTML
     const windowOptionsHtml = windowsList.map(w => {
-      const label = `#${w.id}: ${truncateUrl(w.firstTabUrl)} (${w.tabCount} tabs)`;
-      return `<option value="${w.id}">${escapeHtml(label)}</option>`;
+      return `<option value="${w.id}">${escapeHtml(getWindowLabel(w))}</option>`;
     }).join('');
 
     groupsTableBody.innerHTML = sortedGroups.map((group) => {
@@ -184,11 +191,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   function renderCatchAllSelect() {
     catchAllSelect.innerHTML = '<option value="">(none - leave unmatched tabs)</option>';
 
-    for (const group of currentConfig.groups) {
+    for (const w of windowsList) {
       const option = document.createElement('option');
-      option.value = group.name;
-      option.textContent = group.name;
-      if (currentConfig.catchAllGroupName === group.name) {
+      option.value = w.id;
+      option.textContent = getWindowLabel(w);
+      if (currentConfig.catchAllWindowId === w.id) {
         option.selected = true;
       }
       catchAllSelect.appendChild(option);
@@ -404,7 +411,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           patterns: g.patterns,
           priority: g.priority ?? i
         })),
-        catchAllGroupName: imported.catchAllGroupName || null
+        catchAllWindowId: imported.catchAllWindowId || null
       };
 
       await saveConfig();
@@ -434,7 +441,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   catchAllSelect.addEventListener('change', async () => {
-    currentConfig.catchAllGroupName = catchAllSelect.value || null;
+    currentConfig.catchAllWindowId = catchAllSelect.value ? parseInt(catchAllSelect.value) : null;
     await saveConfig();
     showStatus('Catch-all updated', 'success');
   });

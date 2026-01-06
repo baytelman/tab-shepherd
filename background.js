@@ -4,7 +4,7 @@
 const DEFAULT_CONFIG = {
   enabled: true,
   groups: [],
-  catchAllGroupName: null
+  catchAllWindowId: null
 };
 
 // In-memory cache of window bindings (windowId -> groupName)
@@ -74,11 +74,6 @@ async function findMatchingGroup(url) {
     if (urlMatchesGroup(url, group)) {
       return group;
     }
-  }
-
-  // Return catch-all if configured
-  if (config.catchAllGroupName) {
-    return config.groups.find(g => g.name === config.catchAllGroupName) || null;
   }
 
   return null;
@@ -183,25 +178,38 @@ async function handleTabNavigation(tabId, url, currentWindowId) {
   }
 
   const matchingGroup = await findMatchingGroup(url);
-  if (!matchingGroup) return;
-
   const bindings = await getWindowBindings();
   const currentWindowGroup = bindings[currentWindowId];
 
-  // If tab is already in the correct window, do nothing
-  if (currentWindowGroup === matchingGroup.name) return;
+  if (matchingGroup) {
+    // If tab is already in the correct window, do nothing
+    if (currentWindowGroup === matchingGroup.name) return;
 
-  // Find or create window for this group
-  let targetWindowId = await findWindowForGroup(matchingGroup.name);
+    // Find or create window for this group
+    let targetWindowId = await findWindowForGroup(matchingGroup.name);
 
-  if (targetWindowId && targetWindowId !== currentWindowId) {
-    // Move tab to existing window
-    await moveTabToWindow(tabId, targetWindowId);
-    console.log(`Tab Shepherd: Moved tab to "${matchingGroup.name}" window`);
-  } else if (!targetWindowId) {
-    // Create new window for this group
-    await createWindowForGroup(matchingGroup.name, tabId);
-    console.log(`Tab Shepherd: Created new window for "${matchingGroup.name}"`);
+    if (targetWindowId && targetWindowId !== currentWindowId) {
+      // Move tab to existing window
+      await moveTabToWindow(tabId, targetWindowId);
+      console.log(`Tab Shepherd: Moved tab to "${matchingGroup.name}" window`);
+    } else if (!targetWindowId) {
+      // Create new window for this group
+      await createWindowForGroup(matchingGroup.name, tabId);
+      console.log(`Tab Shepherd: Created new window for "${matchingGroup.name}"`);
+    }
+  } else if (config.catchAllWindowId) {
+    // No matching group - use catch-all window if configured
+    if (currentWindowId === config.catchAllWindowId) return;
+
+    // Verify catch-all window still exists
+    try {
+      await chrome.windows.get(config.catchAllWindowId);
+      await moveTabToWindow(tabId, config.catchAllWindowId);
+      console.log(`Tab Shepherd: Moved unmatched tab to catch-all window`);
+    } catch (e) {
+      // Catch-all window no longer exists
+      console.log(`Tab Shepherd: Catch-all window ${config.catchAllWindowId} no longer exists`);
+    }
   }
 }
 
