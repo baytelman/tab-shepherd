@@ -49,21 +49,25 @@ async function unbindWindow(windowId) {
 // Pattern Matching
 // ============================================================================
 
-function urlMatchesPattern(url, pattern) {
+function matchesPattern(text, pattern) {
+  if (!text) return false;
   try {
     const regex = new RegExp(pattern, 'i');
-    return regex.test(url);
+    return regex.test(text);
   } catch (e) {
     console.error(`Invalid regex pattern: ${pattern}`, e);
     return false;
   }
 }
 
-function urlMatchesGroup(url, group) {
-  return group.patterns.some(pattern => urlMatchesPattern(url, pattern));
+function tabMatchesGroup(url, title, group) {
+  // Check if URL or title matches any pattern in the group
+  return group.patterns.some(pattern =>
+    matchesPattern(url, pattern) || matchesPattern(title, pattern)
+  );
 }
 
-async function findMatchingGroup(url) {
+async function findMatchingGroup(url, title) {
   const config = await getConfig();
   if (!config.enabled) return null;
 
@@ -71,7 +75,7 @@ async function findMatchingGroup(url) {
   const sortedGroups = [...config.groups].sort((a, b) => a.priority - b.priority);
 
   for (const group of sortedGroups) {
-    if (urlMatchesGroup(url, group)) {
+    if (tabMatchesGroup(url, title, group)) {
       return group;
     }
   }
@@ -147,9 +151,9 @@ async function rebindWindowsOnStartup() {
       if (Object.values(newBindings).includes(group.name)) continue;
       if (newBindings[window.id]) continue;
 
-      // Check if any tab in this window matches the group
+      // Check if any tab in this window matches the group (by URL or title)
       const hasMatchingTab = window.tabs?.some(tab =>
-        tab.url && urlMatchesGroup(tab.url, group)
+        tab.url && tabMatchesGroup(tab.url, tab.title, group)
       );
 
       if (hasMatchingTab) {
@@ -168,7 +172,7 @@ async function rebindWindowsOnStartup() {
 // Tab Event Handlers
 // ============================================================================
 
-async function handleTabNavigation(tabId, url, currentWindowId) {
+async function handleTabNavigation(tabId, url, title, currentWindowId) {
   const config = await getConfig();
   if (!config.enabled) return;
 
@@ -177,7 +181,7 @@ async function handleTabNavigation(tabId, url, currentWindowId) {
     return;
   }
 
-  const matchingGroup = await findMatchingGroup(url);
+  const matchingGroup = await findMatchingGroup(url, title);
   const bindings = await getWindowBindings();
   const currentWindowGroup = bindings[currentWindowId];
 
@@ -191,7 +195,7 @@ async function handleTabNavigation(tabId, url, currentWindowId) {
     if (targetWindowId && targetWindowId !== currentWindowId) {
       // Move tab to existing window
       await moveTabToWindow(tabId, targetWindowId);
-      console.log(`Tab Shepherd: Moved tab to "${matchingGroup.name}" window`);
+      console.log(`Tab Shepherd: Moved tab to "${matchingGroup.name}" window (matched URL or title)`);
     } else if (!targetWindowId) {
       // Create new window for this group
       await createWindowForGroup(matchingGroup.name, tabId);
@@ -213,11 +217,11 @@ async function handleTabNavigation(tabId, url, currentWindowId) {
   }
 }
 
-// Listen for tab URL changes
+// Listen for tab URL or title changes
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  // Only act when URL changes (not on every update)
-  if (changeInfo.url) {
-    await handleTabNavigation(tabId, changeInfo.url, tab.windowId);
+  // Act when URL changes or title changes (title often updates after page load)
+  if (changeInfo.url || changeInfo.title) {
+    await handleTabNavigation(tabId, tab.url, tab.title, tab.windowId);
   }
 });
 
@@ -225,7 +229,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 chrome.tabs.onCreated.addListener(async (tab) => {
   // New tabs often start with chrome://newtab, wait for actual navigation
   if (tab.pendingUrl && !tab.pendingUrl.startsWith('chrome://')) {
-    await handleTabNavigation(tab.id, tab.pendingUrl, tab.windowId);
+    await handleTabNavigation(tab.id, tab.pendingUrl, tab.title, tab.windowId);
   }
 });
 
@@ -257,7 +261,7 @@ async function sortAllTabs() {
         continue;
       }
 
-      const matchingGroup = await findMatchingGroup(tab.url);
+      const matchingGroup = await findMatchingGroup(tab.url, tab.title);
       if (!matchingGroup) continue;
 
       const currentWindowGroup = bindings[window.id];
