@@ -20,7 +20,80 @@
     </header>
 
     <main class="main">
-      <section class="section">
+      <!-- Quick Start Templates (shown when no groups) -->
+      <section class="section" id="quickStartSection" style="display: none;">
+        <div class="section-header">
+          <h2>Quick Start</h2>
+          <p class="hint">Get started quickly with common templates.</p>
+        </div>
+
+        <div class="templates-grid">
+          <label class="template-card">
+            <input type="checkbox" value="development" checked>
+            <div class="template-content">
+              <span class="template-icon">&#x1F4BB;</span>
+              <span class="template-name">Development</span>
+              <span class="template-desc">localhost, 127.0.0.1</span>
+            </div>
+          </label>
+
+          <label class="template-card">
+            <input type="checkbox" value="github" checked>
+            <div class="template-content">
+              <span class="template-icon">&#x1F419;</span>
+              <span class="template-name">GitHub</span>
+              <span class="template-desc">github.com</span>
+            </div>
+          </label>
+
+          <label class="template-card">
+            <input type="checkbox" value="google">
+            <div class="template-content">
+              <span class="template-icon">&#x1F4DD;</span>
+              <span class="template-name">Google Workspace</span>
+              <span class="template-desc">docs, sheets, drive, gmail</span>
+            </div>
+          </label>
+
+          <label class="template-card">
+            <input type="checkbox" value="productivity">
+            <div class="template-content">
+              <span class="template-icon">&#x1F4CB;</span>
+              <span class="template-name">Productivity</span>
+              <span class="template-desc">notion, linear, slack, figma</span>
+            </div>
+          </label>
+
+          <label class="template-card">
+            <input type="checkbox" value="social">
+            <div class="template-content">
+              <span class="template-icon">&#x1F310;</span>
+              <span class="template-name">Social</span>
+              <span class="template-desc">twitter, linkedin, reddit</span>
+            </div>
+          </label>
+
+          <label class="template-card">
+            <input type="checkbox" value="entertainment">
+            <div class="template-content">
+              <span class="template-icon">&#x1F3AC;</span>
+              <span class="template-name">Entertainment</span>
+              <span class="template-desc">youtube, netflix, spotify</span>
+            </div>
+          </label>
+        </div>
+
+        <button id="addTemplatesBtn" class="btn btn-primary" style="width: 100%; margin-top: 16px;">
+          <span>+</span> Add Selected Templates
+        </button>
+
+        <p class="hint" style="margin-top: 12px; text-align: center;">
+          Or <a href="#" id="skipTemplatesLink">skip and create groups manually</a>
+        </p>
+      </section>
+
+      <!-- Window Groups Table -->
+      <section class="section" id="groupsSection">
         <div class="section-header">
           <h2>Window Groups</h2>
           <p class="hint">Drag to reorder priority. First matching pattern wins.</p>
@@ -43,6 +116,9 @@
         <div class="table-actions">
           <button id="addGroupBtn" class="btn btn-add">
             <span>+</span> Add Group
+          </button>
+          <button id="addFromTemplateBtn" class="btn btn-secondary">
+            <span>&#x1F4E6;</span> Add from Template
           </button>
           <button id="refreshWindowsBtn" class="btn btn-secondary">
             <span>&#x21bb;</span> Refresh Windows
@@ -84,24 +160,90 @@
 
   <!-- Group Edit Modal -->
   <div id="groupModal" class="modal" style="display: none;">
-    <div class="modal-content">
+    <div class="modal-content modal-large">
       <div class="modal-header">
         <h3 id="modalTitle">Add Group</h3>
         <button id="modalCloseBtn" class="modal-close">&times;</button>
       </div>
       <div class="modal-body">
-        <div class="form-group">
-          <label>Group Name</label>
-          <input type="text" id="groupNameInput" placeholder="e.g., work, github, docs">
-        </div>
-        <div class="form-group">
-          <label>URL Patterns (one per line, regex supported)</label>
-          <textarea id="groupPatternsInput" rows="5" placeholder="github\.com&#10;localhost:3000&#10;\?project=myapp"></textarea>
+        <div class="modal-columns">
+          <div class="modal-left">
+            <div class="form-group">
+              <label>Group Name</label>
+              <input type="text" id="groupNameInput" placeholder="e.g., work, github, docs">
+            </div>
+
+            <div class="form-group">
+              <label>
+                Match Mode
+                <span class="help-icon" title="Simple: matches if URL or title contains the text. Regex: uses regular expressions for advanced matching.">?</span>
+              </label>
+              <div class="mode-toggle">
+                <button type="button" class="mode-btn active" data-mode="simple">Simple (contains)</button>
+                <button type="button" class="mode-btn" data-mode="regex">Regex (advanced)</button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label id="patternsLabel">
+                URL &amp; Title Patterns <span class="label-hint">(one per line)</span>
+              </label>
+              <textarea id="groupPatternsInput" rows="6" placeholder="github.com&#10;localhost:3000&#10;my-project"></textarea>
+
+              <div class="pattern-tips" id="simpleTips">
+                <strong>Tips:</strong> Each line matches if the URL or page title contains that text (case-insensitive).
+              </div>
+              <div class="pattern-tips" id="regexTips" style="display: none;">
+                <strong>Tips:</strong>
+                <ul>
+                  <li><code>\.</code> matches a literal dot</li>
+                  <li><code>[0-9]</code> matches any digit</li>
+                  <li><code>.*</code> matches anything</li>
+                  <li><code>localhost:300[0-9]</code> matches ports 3000-3009</li>
+                </ul>
+              </div>
+            </div>
+
+            <input type="hidden" id="matchModeInput" value="simple">
+          </div>
+
+          <div class="modal-right">
+            <div class="pattern-tester">
+              <div class="tester-header">
+                <strong>Pattern Tester</strong>
+                <span class="match-count" id="matchCount">0 matches</span>
+              </div>
+              <div class="tester-results" id="testerResults">
+                <p class="tester-hint">Enter patterns to see which tabs would match.</p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <div class="modal-footer">
         <button id="modalCancelBtn" class="btn btn-secondary">Cancel</button>
         <button id="modalSaveBtn" class="btn btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Template Selection Modal -->
+  <div id="templateModal" class="modal" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Add from Template</h3>
+        <button id="templateModalCloseBtn" class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="hint" style="margin-bottom: 16px;">Select templates to add as new groups:</p>
+
+        <div class="template-list" id="templateList">
+          <!-- Templates will be populated here -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="templateModalCancelBtn" class="btn btn-secondary">Cancel</button>
+        <button id="templateModalAddBtn" class="btn btn-primary">Add Selected</button>
       </div>
     </div>
   </div>

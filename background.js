@@ -394,6 +394,93 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: true });
         break;
 
+      case 'testPatterns':
+        // Test patterns against all open tabs
+        const testWindows = await chrome.windows.getAll({ populate: true });
+        const testBindings = await getWindowBindings();
+        const patterns = message.patterns || [];
+        const isSimpleMode = message.simpleMode || false;
+
+        const allTabs = [];
+        for (const win of testWindows) {
+          if (win.type !== 'normal') continue;
+          const windowGroup = testBindings[win.id] || null;
+
+          for (const tab of win.tabs || []) {
+            if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
+              continue;
+            }
+
+            // Test each pattern
+            let matches = false;
+            for (const pattern of patterns) {
+              if (!pattern.trim()) continue;
+              try {
+                if (isSimpleMode) {
+                  // Simple "contains" mode (case-insensitive)
+                  const lowerPattern = pattern.toLowerCase();
+                  matches = (tab.url && tab.url.toLowerCase().includes(lowerPattern)) ||
+                            (tab.title && tab.title.toLowerCase().includes(lowerPattern));
+                } else {
+                  // Regex mode
+                  const regex = new RegExp(pattern, 'i');
+                  matches = regex.test(tab.url) || regex.test(tab.title || '');
+                }
+                if (matches) break;
+              } catch (e) {
+                // Invalid regex, skip
+              }
+            }
+
+            allTabs.push({
+              id: tab.id,
+              url: tab.url,
+              title: tab.title || '(no title)',
+              windowId: win.id,
+              windowGroup,
+              matches
+            });
+          }
+        }
+        sendResponse(allTabs);
+        break;
+
+      case 'identifyWindow':
+        // Flash/focus a window to help user identify it
+        try {
+          const targetWin = await chrome.windows.get(message.windowId);
+          // Focus the window
+          await chrome.windows.update(message.windowId, { focused: true });
+          sendResponse({ success: true });
+        } catch (e) {
+          sendResponse({ error: 'Window not found' });
+        }
+        break;
+
+      case 'getAllTabs':
+        // Get all tabs for pattern testing preview
+        const previewWindows = await chrome.windows.getAll({ populate: true });
+        const previewBindings = await getWindowBindings();
+        const tabList = [];
+
+        for (const win of previewWindows) {
+          if (win.type !== 'normal') continue;
+          for (const tab of win.tabs || []) {
+            if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
+              continue;
+            }
+            tabList.push({
+              id: tab.id,
+              url: tab.url,
+              title: tab.title || '(no title)',
+              windowId: win.id,
+              windowGroup: previewBindings[win.id] || null
+            });
+          }
+        }
+        sendResponse(tabList);
+        break;
+
       default:
         sendResponse({ error: 'Unknown action' });
     }
