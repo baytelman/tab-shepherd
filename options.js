@@ -61,13 +61,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function getWindowLabel(w) {
-    // Prefer title, fall back to URL
-    if (w.firstTabTitle && w.firstTabTitle !== '(no tabs)') {
-      return `${truncate(w.firstTabTitle)} (${w.tabCount} tabs)`;
+    // Priority order:
+    // 1. Tab group name (if any tab is in a named group)
+    // 2. First tab's title
+    // 3. Window ID as fallback
+    // Note: Chrome doesn't expose user-defined window names to extensions
+
+    let name;
+    if (w.tabGroupName) {
+      name = w.tabGroupName;
+    } else if (w.firstTabTitle && w.firstTabTitle !== '(no tabs)') {
+      name = w.firstTabTitle;
+    } else {
+      name = `Window ${w.id}`;
     }
-    // Fall back to URL without protocol
-    const url = (w.firstTabUrl || '').replace(/^https?:\/\//, '');
-    return `${truncate(url)} (${w.tabCount} tabs)`;
+
+    return `${truncate(name)} (${w.tabCount} tabs)`;
   }
 
   function escapeHtml(str) {

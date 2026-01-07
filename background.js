@@ -339,15 +339,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'getAllWindows':
         const allWindows = await chrome.windows.getAll({ populate: true });
         const allBindings = await getWindowBindings();
+
+        // Get all tab groups
+        const allTabGroups = await chrome.tabGroups.query({});
+        const tabGroupMap = {};
+        for (const group of allTabGroups) {
+          tabGroupMap[group.id] = group.title || null;
+        }
+
         const windowList = allWindows
           .filter(w => w.type === 'normal')
           .map(w => {
-            // Get first non-chrome tab URL for identification
+            // Get first non-chrome tab for fallback
             const firstTab = w.tabs?.find(t => t.url && !t.url.startsWith('chrome://'));
             const tabCount = w.tabs?.length || 0;
+
+            // Find first tab group name in this window
+            let tabGroupName = null;
+            for (const tab of w.tabs || []) {
+              if (tab.groupId && tab.groupId !== -1 && tabGroupMap[tab.groupId]) {
+                tabGroupName = tabGroupMap[tab.groupId];
+                break;
+              }
+            }
+
             return {
               id: w.id,
               tabCount,
+              tabGroupName,
               firstTabUrl: firstTab?.url || '(empty)',
               firstTabTitle: firstTab?.title || '(no tabs)',
               boundGroup: allBindings[w.id] || null
