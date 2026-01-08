@@ -1,0 +1,11 @@
+{
+  "name": "tab-shepherd",
+  "version": "1.2.0",
+  "description": "Automatically route tabs to named windows based on URL patterns",
+  "scripts": {
+    "test": "jest"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}
