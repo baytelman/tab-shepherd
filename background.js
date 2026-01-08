@@ -58,21 +58,28 @@ async function unbindWindow(windowId) {
 // Pattern Matching
 // ============================================================================
 
-function matchesPattern(text, pattern) {
-  if (!text) return false;
+function matchesPattern(text, pattern, isSimpleMode = false) {
+  if (!text || !pattern) return false;
   try {
-    const regex = new RegExp(pattern, 'i');
-    return regex.test(text);
+    if (isSimpleMode) {
+      // Simple mode: case-insensitive contains
+      return text.toLowerCase().includes(pattern.toLowerCase());
+    } else {
+      // Regex mode
+      const regex = new RegExp(pattern, 'i');
+      return regex.test(text);
+    }
   } catch (e) {
-    console.error(`Invalid regex pattern: ${pattern}`, e);
+    console.error(`Invalid pattern: ${pattern}`, e);
     return false;
   }
 }
 
 function tabMatchesGroup(url, title, group) {
+  const isSimple = group.mode === 'simple';
   // Check if URL or title matches any pattern in the group
   return group.patterns.some(pattern =>
-    matchesPattern(url, pattern) || matchesPattern(title, pattern)
+    matchesPattern(url, pattern, isSimple) || matchesPattern(title, pattern, isSimple)
   );
 }
 
@@ -254,6 +261,8 @@ chrome.windows.onRemoved.addListener(async (windowId) => {
 
 async function sortAllTabs() {
   const config = await getConfig();
+  console.log('Tab Shepherd: sortAllTabs called', { enabled: config.enabled, groupCount: config.groups.length });
+
   if (!config.enabled || config.groups.length === 0) return { moved: 0, errors: [] };
 
   let movedCount = 0;
@@ -261,14 +270,19 @@ async function sortAllTabs() {
 
   // Process each group in priority order to avoid conflicts
   const sortedGroups = [...config.groups].sort((a, b) => a.priority - b.priority);
+  console.log('Tab Shepherd: Processing groups in order:', sortedGroups.map(g => `${g.name} (pri=${g.priority}, mode=${g.mode})`));
 
   for (const group of sortedGroups) {
     // Re-fetch windows and bindings for each group to get fresh state
     const windows = await chrome.windows.getAll({ populate: true });
     const bindings = await getWindowBindings();
 
+    console.log(`Tab Shepherd: Processing group "${group.name}" with patterns:`, group.patterns);
+    console.log('Tab Shepherd: Current bindings:', bindings);
+
     // Find or establish the target window for this group
     let targetWindowId = await findWindowForGroup(group.name);
+    console.log(`Tab Shepherd: Target window for "${group.name}":`, targetWindowId);
 
     // Collect tabs that match this group but aren't in the right window
     const tabsToMove = [];
@@ -281,20 +295,28 @@ async function sortAllTabs() {
         }
 
         // Check if this tab matches the current group
-        if (!tabMatchesGroup(tab.url, tab.title, group)) continue;
+        const matches = tabMatchesGroup(tab.url, tab.title, group);
+        if (!matches) continue;
+
+        console.log(`Tab Shepherd: Tab matches "${group.name}":`, { url: tab.url, title: tab.title, windowId: window.id });
 
         // Skip if already in the correct window
         const currentWindowGroup = bindings[window.id];
-        if (currentWindowGroup === group.name) continue;
+        if (currentWindowGroup === group.name) {
+          console.log(`Tab Shepherd: Tab already in correct window for "${group.name}"`);
+          continue;
+        }
 
         // Skip if in a window bound to a HIGHER priority group
         if (currentWindowGroup) {
           const currentGroupConfig = config.groups.find(g => g.name === currentWindowGroup);
           if (currentGroupConfig && currentGroupConfig.priority < group.priority) {
+            console.log(`Tab Shepherd: Tab in higher-priority window "${currentWindowGroup}", not moving`);
             continue; // Higher priority group owns this window, don't steal tabs
           }
         }
 
+        console.log(`Tab Shepherd: Will move tab to "${group.name}"`);
         tabsToMove.push({ tab, sourceWindowId: window.id });
       }
     }
