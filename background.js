@@ -35,6 +35,15 @@ async function saveWindowBindings(bindings) {
 
 async function bindWindow(windowId, groupName) {
   const bindings = await getWindowBindings();
+
+  // Ensure only ONE window is bound to this group - unbind others first
+  for (const [wid, gname] of Object.entries(bindings)) {
+    if (gname === groupName && parseInt(wid, 10) !== windowId) {
+      delete bindings[wid];
+      console.log(`Tab Shepherd: Unbound window ${wid} from "${groupName}" (new binding to ${windowId})`);
+    }
+  }
+
   bindings[windowId] = groupName;
   await saveWindowBindings(bindings);
 }
@@ -247,44 +256,75 @@ async function sortAllTabs() {
   const config = await getConfig();
   if (!config.enabled || config.groups.length === 0) return { moved: 0, errors: [] };
 
-  const windows = await chrome.windows.getAll({ populate: true });
-  const bindings = await getWindowBindings();
   let movedCount = 0;
   const errors = [];
 
-  // Collect all tabs that need to move
-  const tabsToMove = [];
+  // Process each group in priority order to avoid conflicts
+  const sortedGroups = [...config.groups].sort((a, b) => a.priority - b.priority);
 
-  for (const window of windows) {
-    for (const tab of window.tabs || []) {
-      if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
-        continue;
-      }
+  for (const group of sortedGroups) {
+    // Re-fetch windows and bindings for each group to get fresh state
+    const windows = await chrome.windows.getAll({ populate: true });
+    const bindings = await getWindowBindings();
 
-      const matchingGroup = await findMatchingGroup(tab.url, tab.title);
-      if (!matchingGroup) continue;
+    // Find or establish the target window for this group
+    let targetWindowId = await findWindowForGroup(group.name);
 
-      const currentWindowGroup = bindings[window.id];
-      if (currentWindowGroup !== matchingGroup.name) {
-        tabsToMove.push({ tab, targetGroup: matchingGroup.name });
+    // Collect tabs that match this group but aren't in the right window
+    const tabsToMove = [];
+    for (const window of windows) {
+      if (window.type !== 'normal') continue;
+
+      for (const tab of window.tabs || []) {
+        if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
+          continue;
+        }
+
+        // Check if this tab matches the current group
+        if (!tabMatchesGroup(tab.url, tab.title, group)) continue;
+
+        // Skip if already in the correct window
+        const currentWindowGroup = bindings[window.id];
+        if (currentWindowGroup === group.name) continue;
+
+        // Skip if in a window bound to a HIGHER priority group
+        if (currentWindowGroup) {
+          const currentGroupConfig = config.groups.find(g => g.name === currentWindowGroup);
+          if (currentGroupConfig && currentGroupConfig.priority < group.priority) {
+            continue; // Higher priority group owns this window, don't steal tabs
+          }
+        }
+
+        tabsToMove.push({ tab, sourceWindowId: window.id });
       }
     }
-  }
 
-  // Process moves
-  for (const { tab, targetGroup } of tabsToMove) {
-    try {
-      let targetWindowId = await findWindowForGroup(targetGroup);
+    // Process moves for this group
+    for (const { tab, sourceWindowId } of tabsToMove) {
+      try {
+        // Re-check target window (might have been created in previous iteration)
+        targetWindowId = await findWindowForGroup(group.name);
 
-      if (targetWindowId && targetWindowId !== tab.windowId) {
-        await chrome.tabs.move(tab.id, { windowId: targetWindowId, index: -1 });
-        movedCount++;
-      } else if (!targetWindowId) {
-        await createWindowForGroup(targetGroup, tab.id);
-        movedCount++;
+        // Verify tab still exists and is in expected window
+        let currentTab;
+        try {
+          currentTab = await chrome.tabs.get(tab.id);
+        } catch (e) {
+          continue; // Tab no longer exists
+        }
+
+        if (targetWindowId && targetWindowId !== currentTab.windowId) {
+          await chrome.tabs.move(tab.id, { windowId: targetWindowId, index: -1 });
+          movedCount++;
+          console.log(`Tab Shepherd: Moved tab to "${group.name}" window`);
+        } else if (!targetWindowId) {
+          targetWindowId = await createWindowForGroup(group.name, tab.id);
+          movedCount++;
+          console.log(`Tab Shepherd: Created new window for "${group.name}"`);
+        }
+      } catch (e) {
+        errors.push(`Failed to move tab "${tab.title}": ${e.message}`);
       }
-    } catch (e) {
-      errors.push(`Failed to move tab "${tab.title}": ${e.message}`);
     }
   }
 
