@@ -244,18 +244,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Event: Label window with tab group
   labelWindowBtn.addEventListener('click', async () => {
-    const currentWindow = await sendMessage({ action: 'getCurrentWindow' });
-
-    if (!currentWindow.groupName) {
+    if (!currentGroupName) {
       showStatus('Assign a group first', 'error');
       return;
     }
 
     labelWindowBtn.disabled = true;
     try {
-      const result = await sendMessage({ action: 'labelWindow', windowId: currentWindow.windowId });
+      const result = await sendMessage({ action: 'labelWindow', windowId: currentWindowId });
       if (result.success) {
-        showStatus(`Labeled as "${currentWindow.groupName}"`, 'success');
+        showStatus(`Labeled as "${currentGroupName}"`, 'success');
       } else {
         showStatus(result.error || 'Failed to label', 'error');
       }
