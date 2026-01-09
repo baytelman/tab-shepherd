@@ -9,12 +9,35 @@ document.addEventListener('DOMContentLoaded', async () => {
   const optionsBtn = document.getElementById('optionsBtn');
   const statusDiv = document.getElementById('status');
 
+  // Modal elements
+  const reassignModal = document.getElementById('reassignModal');
+  const modalMessage = document.getElementById('modalMessage');
+  const modalReassign = document.getElementById('modalReassign');
+  const modalGoto = document.getElementById('modalGoto');
+  const modalCancel = document.getElementById('modalCancel');
+
+  // State
+  let currentWindowId = null;
+  let currentGroupName = null;
+  let pendingSelection = null;
+  let groupAssignments = {}; // groupName -> windowId
+
   // Load current state
   async function loadState() {
-    const [config, currentWindow] = await Promise.all([
+    const [config, currentWindow, bindings] = await Promise.all([
       sendMessage({ action: 'getConfig' }),
-      sendMessage({ action: 'getCurrentWindow' })
+      sendMessage({ action: 'getCurrentWindow' }),
+      sendMessage({ action: 'getWindowBindings' })
     ]);
+
+    currentWindowId = currentWindow.windowId;
+    currentGroupName = currentWindow.groupName;
+
+    // Build reverse map: groupName -> windowId
+    groupAssignments = {};
+    for (const [windowId, groupName] of Object.entries(bindings)) {
+      groupAssignments[groupName] = parseInt(windowId, 10);
+    }
 
     // Set enable toggle
     enableToggle.checked = config.enabled;
@@ -29,13 +52,50 @@ document.addEventListener('DOMContentLoaded', async () => {
       noGroupsMessage.style.display = 'none';
       windowGroupSelect.disabled = false;
 
-      // Sort by priority
-      const sortedGroups = [...config.groups].sort((a, b) => a.priority - b.priority);
-      for (const group of sortedGroups) {
+      // Separate into unassigned and assigned groups
+      const unassigned = [];
+      const assigned = [];
+
+      for (const group of config.groups) {
+        const assignedWindowId = groupAssignments[group.name];
+        if (assignedWindowId && assignedWindowId !== currentWindowId) {
+          assigned.push(group);
+        } else {
+          unassigned.push(group);
+        }
+      }
+
+      // Sort both alphabetically
+      unassigned.sort((a, b) => a.name.localeCompare(b.name));
+      assigned.sort((a, b) => a.name.localeCompare(b.name));
+
+      // Add unassigned groups first
+      for (const group of unassigned) {
         const option = document.createElement('option');
         option.value = group.name;
         option.textContent = group.name;
-        if (currentWindow.groupName === group.name) {
+        if (currentGroupName === group.name) {
+          option.selected = true;
+        }
+        windowGroupSelect.appendChild(option);
+      }
+
+      // Add separator if both lists have items
+      if (unassigned.length > 0 && assigned.length > 0) {
+        const separator = document.createElement('option');
+        separator.disabled = true;
+        separator.textContent = '── Assigned ──';
+        windowGroupSelect.appendChild(separator);
+      }
+
+      // Add assigned groups with icon
+      for (const group of assigned) {
+        const option = document.createElement('option');
+        option.value = group.name;
+        option.textContent = `● ${group.name}`;
+        option.dataset.assigned = 'true';
+        option.dataset.windowId = groupAssignments[group.name];
+        if (currentGroupName === group.name) {
           option.selected = true;
         }
         windowGroupSelect.appendChild(option);
@@ -60,6 +120,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     }, 3000);
   }
 
+  // Show modal
+  function showModal(groupName, windowId) {
+    pendingSelection = { groupName, windowId };
+    modalMessage.textContent = `"${groupName}" is assigned to another window.`;
+    reassignModal.style.display = 'block';
+  }
+
+  // Hide modal
+  function hideModal() {
+    reassignModal.style.display = 'none';
+    pendingSelection = null;
+  }
+
+  // Assign group to current window
+  async function assignGroup(groupName) {
+    await sendMessage({
+      action: 'bindWindow',
+      windowId: currentWindowId,
+      groupName: groupName
+    });
+    showStatus(`Window assigned to "${groupName}"`, 'success');
+    await loadState();
+  }
+
   // Event: Toggle enabled
   enableToggle.addEventListener('change', async () => {
     const config = await sendMessage({ action: 'getConfig' });
@@ -70,23 +154,61 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Event: Change window group
   windowGroupSelect.addEventListener('change', async () => {
-    const currentWindow = await sendMessage({ action: 'getCurrentWindow' });
+    const selectedOption = windowGroupSelect.selectedOptions[0];
     const selectedGroup = windowGroupSelect.value;
 
-    if (selectedGroup) {
-      await sendMessage({
-        action: 'bindWindow',
-        windowId: currentWindow.windowId,
-        groupName: selectedGroup
-      });
-      showStatus(`Window assigned to "${selectedGroup}"`, 'success');
-    } else {
+    if (!selectedGroup) {
+      // Unassigning
       await sendMessage({
         action: 'unbindWindow',
-        windowId: currentWindow.windowId
+        windowId: currentWindowId
       });
       showStatus('Window unassigned', 'info');
+      await loadState();
+      return;
     }
+
+    // Check if this group is assigned to another window
+    if (selectedOption.dataset.assigned === 'true') {
+      const assignedWindowId = parseInt(selectedOption.dataset.windowId, 10);
+      showModal(selectedGroup, assignedWindowId);
+      // Reset selection to current
+      await loadState();
+      return;
+    }
+
+    // Assign directly
+    await assignGroup(selectedGroup);
+  });
+
+  // Modal: Re-assign
+  modalReassign.addEventListener('click', async () => {
+    if (pendingSelection) {
+      await assignGroup(pendingSelection.groupName);
+    }
+    hideModal();
+  });
+
+  // Modal: Go to window
+  modalGoto.addEventListener('click', async () => {
+    if (pendingSelection) {
+      await sendMessage({
+        action: 'identifyWindow',
+        windowId: pendingSelection.windowId
+      });
+    }
+    hideModal();
+    window.close();
+  });
+
+  // Modal: Cancel
+  modalCancel.addEventListener('click', () => {
+    hideModal();
+  });
+
+  // Click backdrop to cancel
+  reassignModal.querySelector('.modal-backdrop').addEventListener('click', () => {
+    hideModal();
   });
 
   // Event: Sort all tabs

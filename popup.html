@@ -41,6 +41,20 @@
     <div id="status" class="status" style="display: none;"></div>
   </div>
 
+  <!-- Reassign Confirmation Modal -->
+  <div id="reassignModal" class="modal" style="display: none;">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <p class="modal-title">Already assigned</p>
+      <p class="modal-message" id="modalMessage"></p>
+      <div class="modal-actions">
+        <button id="modalReassign" class="btn btn-primary">Re-assign</button>
+        <button id="modalGoto" class="btn btn-secondary">Go to window</button>
+        <button id="modalCancel" class="btn btn-secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <script src="popup.js"></script>
 </body>
 </html>
