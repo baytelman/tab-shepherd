@@ -519,6 +519,54 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         break;
 
+      case 'labelWindow':
+        // Create a tab group for all tabs in the window with the bound group name
+        try {
+          const labelBindings = await getWindowBindings();
+          const groupName = labelBindings[message.windowId];
+
+          if (!groupName) {
+            sendResponse({ error: 'Window not assigned to a group' });
+            break;
+          }
+
+          // Get all tabs in the window
+          const windowTabs = await chrome.tabs.query({ windowId: message.windowId });
+          const tabIds = windowTabs
+            .filter(t => !t.url.startsWith('chrome://') && !t.url.startsWith('chrome-extension://'))
+            .map(t => t.id);
+
+          if (tabIds.length === 0) {
+            sendResponse({ error: 'No tabs to group' });
+            break;
+          }
+
+          // Check if there's already a tab group with this name in the window
+          const existingGroups = await chrome.tabGroups.query({ windowId: message.windowId });
+          let existingGroupId = null;
+          for (const g of existingGroups) {
+            if (g.title === groupName) {
+              existingGroupId = g.id;
+              break;
+            }
+          }
+
+          if (existingGroupId) {
+            // Add tabs to existing group
+            await chrome.tabs.group({ tabIds, groupId: existingGroupId });
+          } else {
+            // Create new group
+            const newGroupId = await chrome.tabs.group({ tabIds, createProperties: { windowId: message.windowId } });
+            await chrome.tabGroups.update(newGroupId, { title: groupName, collapsed: false });
+          }
+
+          sendResponse({ success: true });
+        } catch (e) {
+          console.error('Failed to label window:', e);
+          sendResponse({ error: e.message });
+        }
+        break;
+
       case 'getAllTabs':
         // Get all tabs for pattern testing preview
         const previewWindows = await chrome.windows.getAll({ populate: true });

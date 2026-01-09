@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const windowGroupSelect = document.getElementById('windowGroup');
   const noGroupsMessage = document.getElementById('noGroupsMessage');
   const sortAllBtn = document.getElementById('sortAllBtn');
+  const labelWindowBtn = document.getElementById('labelWindowBtn');
   const optionsBtn = document.getElementById('optionsBtn');
   const statusDiv = document.getElementById('status');
 
@@ -91,7 +92,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Event: Sort all tabs
   sortAllBtn.addEventListener('click', async () => {
     sortAllBtn.disabled = true;
-    sortAllBtn.innerHTML = '<span>&#x21bb;</span> Sorting...';
+    sortAllBtn.innerHTML = '<span>&#x21bb;</span> ...';
 
     try {
       const result = await sendMessage({ action: 'sortAllTabs' });
@@ -110,7 +111,31 @@ document.addEventListener('DOMContentLoaded', async () => {
       console.error(e);
     } finally {
       sortAllBtn.disabled = false;
-      sortAllBtn.innerHTML = '<span>&#x21bb;</span> Sort All Tabs';
+      sortAllBtn.innerHTML = '<span>&#x21bb;</span> Sort All';
+    }
+  });
+
+  // Event: Label window with tab group
+  labelWindowBtn.addEventListener('click', async () => {
+    const currentWindow = await sendMessage({ action: 'getCurrentWindow' });
+
+    if (!currentWindow.groupName) {
+      showStatus('Assign a group first', 'error');
+      return;
+    }
+
+    labelWindowBtn.disabled = true;
+    try {
+      const result = await sendMessage({ action: 'labelWindow', windowId: currentWindow.windowId });
+      if (result.success) {
+        showStatus(`Labeled as "${currentWindow.groupName}"`, 'success');
+      } else {
+        showStatus(result.error || 'Failed to label', 'error');
+      }
+    } catch (e) {
+      showStatus('Error labeling window', 'error');
+    } finally {
+      labelWindowBtn.disabled = false;
     }
   });
 
