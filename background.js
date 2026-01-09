@@ -557,9 +557,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // Add tabs to existing group
             await chrome.tabs.group({ tabIds, groupId: existingGroupId });
           } else {
-            // Create new group
+            // Create new group with unique color
             const newGroupId = await chrome.tabs.group({ tabIds, createProperties: { windowId: message.windowId } });
-            await chrome.tabGroups.update(newGroupId, { title: groupName, collapsed: false });
+
+            // Pick a color not used by other tab groups across all windows
+            const TAB_GROUP_COLORS = ['blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange', 'grey'];
+            const allTabGroups = await chrome.tabGroups.query({});
+            const usedColors = new Set(allTabGroups.map(g => g.color));
+            const availableColor = TAB_GROUP_COLORS.find(c => !usedColors.has(c)) || TAB_GROUP_COLORS[0];
+
+            await chrome.tabGroups.update(newGroupId, { title: groupName, color: availableColor, collapsed: false });
           }
 
           sendResponse({ success: true });

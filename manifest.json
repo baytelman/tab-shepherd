@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tab Shepherd",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "Automatically route tabs to named windows based on URL patterns",
   "permissions": [
     "tabs",
