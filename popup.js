@@ -24,14 +24,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Load current state
   async function loadState() {
-    const [config, currentWindow, bindings] = await Promise.all([
+    // Get current window directly from popup context (more reliable than service worker)
+    const currentWindow = await chrome.windows.getCurrent();
+    const [config, bindings] = await Promise.all([
       sendMessage({ action: 'getConfig' }),
-      sendMessage({ action: 'getCurrentWindow' }),
       sendMessage({ action: 'getWindowBindings' })
     ]);
 
-    currentWindowId = currentWindow.windowId;
-    currentGroupName = currentWindow.groupName;
+    currentWindowId = currentWindow.id;
+    // Keys in bindings are strings after JSON serialization
+    currentGroupName = bindings[String(currentWindowId)] || null;
+
+    console.log('Tab Shepherd loadState:', { currentWindowId, currentGroupName, bindings });
 
     // Build reverse map: groupName -> windowId
     groupAssignments = {};
@@ -135,6 +139,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Assign group to current window
   async function assignGroup(groupName) {
+    console.log('Tab Shepherd assignGroup:', { windowId: currentWindowId, groupName });
     await sendMessage({
       action: 'bindWindow',
       windowId: currentWindowId,

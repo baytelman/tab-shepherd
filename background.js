@@ -34,6 +34,7 @@ async function saveWindowBindings(bindings) {
 }
 
 async function bindWindow(windowId, groupName) {
+  console.log('Tab Shepherd bindWindow called:', { windowId, groupName });
   const bindings = await getWindowBindings();
 
   // Ensure only ONE window is bound to this group - unbind others first
@@ -46,6 +47,7 @@ async function bindWindow(windowId, groupName) {
 
   bindings[windowId] = groupName;
   await saveWindowBindings(bindings);
+  console.log('Tab Shepherd bindWindow saved:', bindings);
 }
 
 async function unbindWindow(windowId) {
