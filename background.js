@@ -207,18 +207,15 @@ async function handleTabNavigation(tabId, url, title, currentWindowId) {
     // If tab is already in the correct window, do nothing
     if (currentWindowGroup === matchingGroup.name) return;
 
-    // Find or create window for this group
+    // Only move if the group is assigned to a window
     let targetWindowId = await findWindowForGroup(matchingGroup.name);
 
     if (targetWindowId && targetWindowId !== currentWindowId) {
-      // Move tab to existing window
+      // Move tab to existing assigned window
       await moveTabToWindow(tabId, targetWindowId);
       console.log(`Tab Shepherd: Moved tab to "${matchingGroup.name}" window (matched URL or title)`);
-    } else if (!targetWindowId) {
-      // Create new window for this group
-      await createWindowForGroup(matchingGroup.name, tabId);
-      console.log(`Tab Shepherd: Created new window for "${matchingGroup.name}"`);
     }
+    // If no window is assigned to this group, leave the tab where it is
   } else if (config.catchAllWindowId) {
     // No matching group - use catch-all window if configured
     if (currentWindowId === config.catchAllWindowId) return;
@@ -337,15 +334,13 @@ async function sortAllTabs() {
           continue; // Tab no longer exists
         }
 
+        // Only move if the group has an assigned window
         if (targetWindowId && targetWindowId !== currentTab.windowId) {
           await chrome.tabs.move(tab.id, { windowId: targetWindowId, index: -1 });
           movedCount++;
           console.log(`Tab Shepherd: Moved tab to "${group.name}" window`);
-        } else if (!targetWindowId) {
-          targetWindowId = await createWindowForGroup(group.name, tab.id);
-          movedCount++;
-          console.log(`Tab Shepherd: Created new window for "${group.name}"`);
         }
+        // If no window is assigned to this group, skip this tab
       } catch (e) {
         errors.push(`Failed to move tab "${tab.title}": ${e.message}`);
       }
