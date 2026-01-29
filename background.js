@@ -85,20 +85,52 @@ function tabMatchesGroup(url, title, group) {
   );
 }
 
+// Returns match info: { group, matchType: 'title' | 'url' | null }
+function getMatchInfo(url, title, group) {
+  const isSimple = group.mode === 'simple';
+
+  // Check title first (higher priority)
+  const titleMatches = group.patterns.some(pattern => matchesPattern(title, pattern, isSimple));
+  if (titleMatches) {
+    return { group, matchType: 'title' };
+  }
+
+  // Then check URL
+  const urlMatches = group.patterns.some(pattern => matchesPattern(url, pattern, isSimple));
+  if (urlMatches) {
+    return { group, matchType: 'url' };
+  }
+
+  return null;
+}
+
 async function findMatchingGroup(url, title) {
   const config = await getConfig();
   if (!config.enabled) return null;
 
-  // Groups are sorted by priority (lower number = higher priority)
-  const sortedGroups = [...config.groups].sort((a, b) => a.priority - b.priority);
-
-  for (const group of sortedGroups) {
-    if (tabMatchesGroup(url, title, group)) {
-      return group;
+  // Collect all matching groups with their match type
+  const matches = [];
+  for (const group of config.groups) {
+    const matchInfo = getMatchInfo(url, title, group);
+    if (matchInfo) {
+      matches.push(matchInfo);
     }
   }
 
-  return null;
+  if (matches.length === 0) return null;
+
+  // Sort matches:
+  // 1. Title matches before URL matches
+  // 2. Alphabetically by group name if same match type
+  matches.sort((a, b) => {
+    // Title matches have priority over URL matches
+    if (a.matchType === 'title' && b.matchType === 'url') return -1;
+    if (a.matchType === 'url' && b.matchType === 'title') return 1;
+    // Same match type: sort alphabetically by group name
+    return a.group.name.localeCompare(b.group.name);
+  });
+
+  return matches[0].group;
 }
 
 // ============================================================================
