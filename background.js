@@ -172,13 +172,31 @@ async function createWindowForGroup(groupName, tabId) {
   return newWindow.id;
 }
 
-async function moveTabToWindow(tabId, windowId) {
+async function moveTabToWindow(tabId, windowId, groupName) {
   try {
     await chrome.tabs.move(tabId, { windowId: windowId, index: -1 });
+    if (groupName) {
+      await addTabToExistingChromeGroup(tabId, windowId, groupName);
+    }
     await chrome.windows.update(windowId, { focused: true });
     return true;
   } catch (e) {
     console.error('Failed to move tab:', e);
+    return false;
+  }
+}
+
+async function addTabToExistingChromeGroup(tabId, windowId, groupName) {
+  try {
+    const groups = await chrome.tabGroups.query({ windowId });
+    const match = groups.find(g => g.title === groupName);
+    if (match) {
+      await chrome.tabs.group({ tabIds: [tabId], groupId: match.id });
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.error('Failed to add tab to Chrome group:', e);
     return false;
   }
 }
@@ -236,15 +254,18 @@ async function handleTabNavigation(tabId, url, title, currentWindowId) {
   const currentWindowGroup = bindings[currentWindowId];
 
   if (matchingGroup) {
-    // If tab is already in the correct window, do nothing
-    if (currentWindowGroup === matchingGroup.name) return;
+    // If tab is already in the correct window, just ensure it's in the Chrome tab group
+    if (currentWindowGroup === matchingGroup.name) {
+      await addTabToExistingChromeGroup(tabId, currentWindowId, matchingGroup.name);
+      return;
+    }
 
     // Only move if the group is assigned to a window
     let targetWindowId = await findWindowForGroup(matchingGroup.name);
 
     if (targetWindowId && targetWindowId !== currentWindowId) {
-      // Move tab to existing assigned window
-      await moveTabToWindow(tabId, targetWindowId);
+      // Move tab to existing assigned window and add to Chrome tab group
+      await moveTabToWindow(tabId, targetWindowId, matchingGroup.name);
       console.log(`Tab Shepherd: Moved tab to "${matchingGroup.name}" window (matched URL or title)`);
     }
     // If no window is assigned to this group, leave the tab where it is
@@ -331,10 +352,11 @@ async function sortAllTabs() {
 
         console.log(`Tab Shepherd: Tab matches "${group.name}":`, { url: tab.url, title: tab.title, windowId: window.id });
 
-        // Skip if already in the correct window
+        // If already in the correct window, just ensure it's in the Chrome tab group
         const currentWindowGroup = bindings[window.id];
         if (currentWindowGroup === group.name) {
-          console.log(`Tab Shepherd: Tab already in correct window for "${group.name}"`);
+          await addTabToExistingChromeGroup(tab.id, window.id, group.name);
+          console.log(`Tab Shepherd: Tab already in correct window for "${group.name}", ensured group membership`);
           continue;
         }
 
@@ -367,10 +389,13 @@ async function sortAllTabs() {
         }
 
         // Only move if the group has an assigned window
-        if (targetWindowId && targetWindowId !== currentTab.windowId) {
-          await chrome.tabs.move(tab.id, { windowId: targetWindowId, index: -1 });
-          movedCount++;
-          console.log(`Tab Shepherd: Moved tab to "${group.name}" window`);
+        if (targetWindowId) {
+          if (targetWindowId !== currentTab.windowId) {
+            await chrome.tabs.move(tab.id, { windowId: targetWindowId, index: -1 });
+            movedCount++;
+            console.log(`Tab Shepherd: Moved tab to "${group.name}" window`);
+          }
+          await addTabToExistingChromeGroup(tab.id, targetWindowId, group.name);
         }
         // If no window is assigned to this group, skip this tab
       } catch (e) {
@@ -594,6 +619,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const availableColor = TAB_GROUP_COLORS.find(c => !usedColors.has(c)) || TAB_GROUP_COLORS[0];
 
             await chrome.tabGroups.update(newGroupId, { title: groupName, color: availableColor, collapsed: false });
+
+            // Verify the update stuck (race condition can leave grey/unnamed groups)
+            await new Promise(r => setTimeout(r, 150));
+            try {
+              const verified = await chrome.tabGroups.get(newGroupId);
+              if (verified.title !== groupName || verified.color !== availableColor) {
+                console.log('Tab Shepherd: Group update did not stick, retrying...');
+                await chrome.tabGroups.update(newGroupId, { title: groupName, color: availableColor, collapsed: false });
+              }
+            } catch (e) {
+              // Group may have been removed, ignore
+            }
           }
 
           sendResponse({ success: true });
