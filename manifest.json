@@ -1,12 +1,16 @@
 {
   "manifest_version": 3,
   "name": "Tab Shepherd",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Automatically route tabs to named windows based on URL patterns",
   "permissions": [
     "tabs",
     "tabGroups",
-    "storage"
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
   ],
   "action": {
     "default_popup": "popup.html",

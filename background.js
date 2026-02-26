@@ -174,9 +174,14 @@ async function createWindowForGroup(groupName, tabId) {
 
 async function moveTabToWindow(tabId, windowId, groupName) {
   try {
+    const tabBefore = await chrome.tabs.get(tabId);
+    const wasActive = tabBefore.active;
     await chrome.tabs.move(tabId, { windowId: windowId, index: -1 });
     if (groupName) {
       await addTabToExistingChromeGroup(tabId, windowId, groupName);
+    }
+    if (wasActive) {
+      await chrome.tabs.update(tabId, { active: true });
     }
     await chrome.windows.update(windowId, { focused: true });
     return true;
@@ -237,6 +242,42 @@ async function rebindWindowsOnStartup() {
 }
 
 // ============================================================================
+// Title Prefix Injection
+// ============================================================================
+
+async function applyTitlePrefix(tabId, groupName) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (prefix) => {
+        const strip = (t) => t.replace(/^\[.+?\] /, '');
+
+        document.title = `[${prefix}] ${strip(document.title)}`;
+
+        // Disconnect any previous observer before creating a new one
+        if (window.__tabShepherdObserver) {
+          window.__tabShepherdObserver.disconnect();
+        }
+
+        const titleEl = document.querySelector('title');
+        if (titleEl) {
+          window.__tabShepherdObserver = new MutationObserver(() => {
+            if (!document.title.startsWith(`[${prefix}]`)) {
+              document.title = `[${prefix}] ${strip(document.title)}`;
+            }
+          });
+          window.__tabShepherdObserver.observe(titleEl, { childList: true });
+        }
+      },
+      args: [groupName]
+    });
+  } catch (e) {
+    // Tab may not be scriptable (chrome://, PDFs, etc.)
+    console.log(`Tab Shepherd: Could not prefix title for tab ${tabId}:`, e.message);
+  }
+}
+
+// ============================================================================
 // Tab Event Handlers
 // ============================================================================
 
@@ -257,6 +298,7 @@ async function handleTabNavigation(tabId, url, title, currentWindowId) {
     // If tab is already in the correct window, just ensure it's in the Chrome tab group
     if (currentWindowGroup === matchingGroup.name) {
       await addTabToExistingChromeGroup(tabId, currentWindowId, matchingGroup.name);
+      await applyTitlePrefix(tabId, matchingGroup.name);
       return;
     }
 
@@ -266,6 +308,7 @@ async function handleTabNavigation(tabId, url, title, currentWindowId) {
     if (targetWindowId && targetWindowId !== currentWindowId) {
       // Move tab to existing assigned window and add to Chrome tab group
       await moveTabToWindow(tabId, targetWindowId, matchingGroup.name);
+      await applyTitlePrefix(tabId, matchingGroup.name);
       console.log(`Tab Shepherd: Moved tab to "${matchingGroup.name}" window (matched URL or title)`);
     }
     // If no window is assigned to this group, leave the tab where it is
@@ -290,6 +333,30 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   // Act when URL changes or title changes (title often updates after page load)
   if (changeInfo.url || changeInfo.title) {
     await handleTabNavigation(tabId, tab.url, tab.title, tab.windowId);
+  }
+  // Re-apply prefix after full page load — navigation destroys the MutationObserver
+  if (changeInfo.status === 'complete' && tab.url &&
+      !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
+    const bindings = await getWindowBindings();
+    const groupName = bindings[tab.windowId];
+    if (groupName) {
+      await applyTitlePrefix(tabId, groupName);
+    }
+  }
+});
+
+// Re-apply prefix whenever the user switches tabs (active tab = window menu entry)
+chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
+  const bindings = await getWindowBindings();
+  const groupName = bindings[windowId];
+  if (!groupName) return;
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
+      await applyTitlePrefix(tabId, groupName);
+    }
+  } catch (e) {
+    // Tab may have been closed
   }
 });
 
@@ -620,16 +687,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
             await chrome.tabGroups.update(newGroupId, { title: groupName, color: availableColor, collapsed: false });
 
-            // Verify the update stuck (race condition can leave grey/unnamed groups)
-            await new Promise(r => setTimeout(r, 150));
-            try {
-              const verified = await chrome.tabGroups.get(newGroupId);
-              if (verified.title !== groupName || verified.color !== availableColor) {
-                console.log('Tab Shepherd: Group update did not stick, retrying...');
-                await chrome.tabGroups.update(newGroupId, { title: groupName, color: availableColor, collapsed: false });
+            // Retry loop — Chrome has a race condition that can leave groups grey/unnamed.
+            // Check at 150ms and again at 300ms to enforce the update.
+            for (const delay of [150, 300]) {
+              await new Promise(r => setTimeout(r, delay));
+              try {
+                const verified = await chrome.tabGroups.get(newGroupId);
+                if (verified.title !== groupName || verified.color !== availableColor) {
+                  console.log(`Tab Shepherd: Group update did not stick at ${delay}ms, retrying...`);
+                  await chrome.tabGroups.update(newGroupId, { title: groupName, color: availableColor, collapsed: false });
+                } else {
+                  break; // Already correct, no need to check further
+                }
+              } catch (e) {
+                break; // Group was removed, stop retrying
               }
-            } catch (e) {
-              // Group may have been removed, ignore
             }
           }
 

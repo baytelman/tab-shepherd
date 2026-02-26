@@ -11,6 +11,7 @@ Automatically route tabs to named windows based on URL patterns.
 - **Catch-all window**: Optional default for unmatched URLs
 - **Sort all tabs**: Re-organize existing tabs with one click
 - **Import/Export**: Backup and share configurations
+- **Window title prefix**: Active tab title is prefixed with `[GroupName]`, making each group window identifiable in Chrome's Windows menu and macOS window switcher
 
 ## Installation
 
@@ -115,6 +116,22 @@ Window IDs change when Chrome restarts. On startup, Tab Shepherd:
 **Groups lost after restart?**
 - Groups are preserved, but window bindings need re-discovery
 - Click "Re-scan Windows" in Options, or just open a matching tab
+
+## Changelog
+
+### 1.7.0
+- **Window title prefix**: Injects `[GroupName]` prefix into the active tab's title so the window is identifiable in Chrome's Windows menu and macOS window switcher. Uses a `MutationObserver` to re-apply the prefix when SPAs dynamically update `document.title`. Prefix is re-applied on tab activation, page load, and tab routing.
+- **Tab group retry**: Improved reliability of tab group name/color assignment — now retries at 150ms and 300ms after creation to handle Chrome's race condition that could leave groups grey or unnamed.
+- **Requires new permissions**: `scripting` + `host_permissions: <all_urls>` (needed for title injection)
+
+### 1.6.0
+- Auto-add moved tabs to Chrome tab groups
+- Fix grey group bug on creation
+- Improve group matching priority: title match over URL match, then alphabetical
+
+### 1.5.2
+- Fix: only move tabs if matching group has an assigned window
+- Improve group matching priority
 
 ## License
 
