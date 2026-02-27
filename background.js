@@ -7,6 +7,17 @@ const DEFAULT_CONFIG = {
   catchAllWindowId: null
 };
 
+// Unique prefix marker so we can recognise and strip our own title prefix
+// before pattern-matching (prevents [🐑Group-A] from triggering Group-A rules).
+const TITLE_PREFIX_START = '[🐑';
+const TITLE_PREFIX_END   = '] ';
+const TITLE_PREFIX_REGEX = /^\[🐑.+?\] /;
+
+function stripTitlePrefix(title) {
+  if (!title) return title;
+  return title.replace(TITLE_PREFIX_REGEX, '');
+}
+
 // In-memory cache of window bindings (windowId -> groupName)
 let windowBindings = {};
 
@@ -79,18 +90,20 @@ function matchesPattern(text, pattern, isSimpleMode = false) {
 
 function tabMatchesGroup(url, title, group) {
   const isSimple = group.mode === 'simple';
+  const cleanTitle = stripTitlePrefix(title);
   // Check if URL or title matches any pattern in the group
   return group.patterns.some(pattern =>
-    matchesPattern(url, pattern, isSimple) || matchesPattern(title, pattern, isSimple)
+    matchesPattern(url, pattern, isSimple) || matchesPattern(cleanTitle, pattern, isSimple)
   );
 }
 
 // Returns match info: { group, matchType: 'title' | 'url' | null }
 function getMatchInfo(url, title, group) {
   const isSimple = group.mode === 'simple';
+  const cleanTitle = stripTitlePrefix(title);
 
   // Check title first (higher priority)
-  const titleMatches = group.patterns.some(pattern => matchesPattern(title, pattern, isSimple));
+  const titleMatches = group.patterns.some(pattern => matchesPattern(cleanTitle, pattern, isSimple));
   if (titleMatches) {
     return { group, matchType: 'title' };
   }
@@ -250,9 +263,13 @@ async function applyTitlePrefix(tabId, groupName) {
     await chrome.scripting.executeScript({
       target: { tabId },
       func: (prefix) => {
-        const strip = (t) => t.replace(/^\[.+?\] /, '');
+        // The 🐑 marker lets us recognise our own prefix and strip it before
+        // pattern-matching, preventing the prefix itself from triggering group rules.
+        const MARKER = '🐑';
+        const strip = (t) => t.replace(new RegExp(`^\\[${MARKER}.+?\\] `), '');
+        const fullPrefix = `[${MARKER}${prefix}] `;
 
-        document.title = `[${prefix}] ${strip(document.title)}`;
+        document.title = fullPrefix + strip(document.title);
 
         // Disconnect any previous observer before creating a new one
         if (window.__tabShepherdObserver) {
@@ -262,8 +279,8 @@ async function applyTitlePrefix(tabId, groupName) {
         const titleEl = document.querySelector('title');
         if (titleEl) {
           window.__tabShepherdObserver = new MutationObserver(() => {
-            if (!document.title.startsWith(`[${prefix}]`)) {
-              document.title = `[${prefix}] ${strip(document.title)}`;
+            if (!document.title.startsWith(fullPrefix)) {
+              document.title = fullPrefix + strip(document.title);
             }
           });
           window.__tabShepherdObserver.observe(titleEl, { childList: true });
@@ -599,15 +616,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             for (const pattern of patterns) {
               if (!pattern.trim()) continue;
               try {
+                const cleanTabTitle = stripTitlePrefix(tab.title);
                 if (isSimpleMode) {
                   // Simple "contains" mode (case-insensitive)
                   const lowerPattern = pattern.toLowerCase();
                   matches = (tab.url && tab.url.toLowerCase().includes(lowerPattern)) ||
-                            (tab.title && tab.title.toLowerCase().includes(lowerPattern));
+                            (cleanTabTitle && cleanTabTitle.toLowerCase().includes(lowerPattern));
                 } else {
                   // Regex mode
                   const regex = new RegExp(pattern, 'i');
-                  matches = regex.test(tab.url) || regex.test(tab.title || '');
+                  matches = regex.test(tab.url) || regex.test(cleanTabTitle || '');
                 }
                 if (matches) break;
               } catch (e) {
