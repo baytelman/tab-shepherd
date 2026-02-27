@@ -18,31 +18,49 @@ function stripTitlePrefix(title) {
   return title.replace(TITLE_PREFIX_REGEX, '');
 }
 
-// In-memory cache of window bindings (windowId -> groupName)
-let windowBindings = {};
+// In-memory caches — eliminates ~90 storage reads per page load
+let cachedConfig = null;
+let cachedBindings = null;
 
 // ============================================================================
-// Storage Helpers
+// Storage Helpers (cached with write-through)
 // ============================================================================
 
 async function getConfig() {
-  const result = await chrome.storage.sync.get('config');
-  return result.config || DEFAULT_CONFIG;
+  if (!cachedConfig) {
+    const result = await chrome.storage.sync.get('config');
+    cachedConfig = result.config || DEFAULT_CONFIG;
+  }
+  return cachedConfig;
 }
 
 async function saveConfig(config) {
+  cachedConfig = config;
   await chrome.storage.sync.set({ config });
 }
 
 async function getWindowBindings() {
-  const result = await chrome.storage.local.get('windowBindings');
-  return result.windowBindings || {};
+  if (!cachedBindings) {
+    const result = await chrome.storage.local.get('windowBindings');
+    cachedBindings = result.windowBindings || {};
+  }
+  return cachedBindings;
 }
 
 async function saveWindowBindings(bindings) {
-  windowBindings = bindings;
+  cachedBindings = bindings;
   await chrome.storage.local.set({ windowBindings: bindings });
 }
+
+// Invalidate caches when storage changes externally (e.g. from options page)
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'sync' && changes.config) {
+    cachedConfig = null;
+  }
+  if (areaName === 'local' && changes.windowBindings) {
+    cachedBindings = null;
+  }
+});
 
 async function bindWindow(windowId, groupName) {
   console.log('Tab Shepherd bindWindow called:', { windowId, groupName });
@@ -117,8 +135,7 @@ function getMatchInfo(url, title, group) {
   return null;
 }
 
-async function findMatchingGroup(url, title) {
-  const config = await getConfig();
+function findMatchingGroup(url, title, config) {
   if (!config.enabled) return null;
 
   // Collect all matching groups with their match type
@@ -188,6 +205,12 @@ async function createWindowForGroup(groupName, tabId) {
 async function moveTabToWindow(tabId, windowId, groupName) {
   try {
     const tabBefore = await chrome.tabs.get(tabId);
+    // Guard: don't move the last tab out of a window (Chrome auto-closes empty windows)
+    const sourceTabs = await chrome.tabs.query({ windowId: tabBefore.windowId });
+    if (sourceTabs.length <= 1) {
+      console.log('Tab Shepherd: Skipping move — would empty source window');
+      return false;
+    }
     const wasActive = tabBefore.active;
     await chrome.tabs.move(tabId, { windowId: windowId, index: -1 });
     if (groupName) {
@@ -307,7 +330,7 @@ async function handleTabNavigation(tabId, url, title, currentWindowId) {
     return;
   }
 
-  const matchingGroup = await findMatchingGroup(url, title);
+  const matchingGroup = findMatchingGroup(url, title, config);
   const bindings = await getWindowBindings();
   const currentWindowGroup = bindings[currentWindowId];
 
@@ -345,12 +368,37 @@ async function handleTabNavigation(tabId, url, title, currentWindowId) {
   }
 }
 
+// Per-tab debounce map for title-change prefix refresh
+const pendingTitleDebounce = new Map();
+
 // Listen for tab URL or title changes
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  // Act when URL changes or title changes (title often updates after page load)
-  if (changeInfo.url || changeInfo.title) {
+  // URL change → route immediately (this is the primary navigation signal)
+  if (changeInfo.url) {
+    // Clear any pending title debounce — URL change supersedes it
+    if (pendingTitleDebounce.has(tabId)) {
+      clearTimeout(pendingTitleDebounce.get(tabId));
+      pendingTitleDebounce.delete(tabId);
+    }
     await handleTabNavigation(tabId, tab.url, tab.title, tab.windowId);
   }
+
+  // Title change → only re-apply prefix (no routing), debounced 150ms
+  // This breaks the feedback loop: title changes no longer trigger group matching
+  if (changeInfo.title && !changeInfo.url) {
+    if (pendingTitleDebounce.has(tabId)) {
+      clearTimeout(pendingTitleDebounce.get(tabId));
+    }
+    pendingTitleDebounce.set(tabId, setTimeout(async () => {
+      pendingTitleDebounce.delete(tabId);
+      const bindings = await getWindowBindings();
+      const groupName = bindings[tab.windowId];
+      if (groupName) {
+        await applyTitlePrefix(tabId, groupName);
+      }
+    }, 150));
+  }
+
   // Re-apply prefix after full page load — navigation destroys the MutationObserver
   if (changeInfo.status === 'complete' && tab.url &&
       !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
@@ -369,9 +417,10 @@ chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
   if (!groupName) return;
   try {
     const tab = await chrome.tabs.get(tabId);
-    if (tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
-      await applyTitlePrefix(tabId, groupName);
-    }
+    if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) return;
+    // Skip if already prefixed — avoids redundant script injection on every tab switch
+    if (tab.title && TITLE_PREFIX_REGEX.test(tab.title)) return;
+    await applyTitlePrefix(tabId, groupName);
   } catch (e) {
     // Tab may have been closed
   }
@@ -408,10 +457,10 @@ async function sortAllTabs() {
   const sortedGroups = [...config.groups].sort((a, b) => a.priority - b.priority);
   console.log('Tab Shepherd: Processing groups in order:', sortedGroups.map(g => `${g.name} (pri=${g.priority}, mode=${g.mode})`));
 
+  let windows = await chrome.windows.getAll({ populate: true });
+  let bindings = await getWindowBindings();
+
   for (const group of sortedGroups) {
-    // Re-fetch windows and bindings for each group to get fresh state
-    const windows = await chrome.windows.getAll({ populate: true });
-    const bindings = await getWindowBindings();
 
     console.log(`Tab Shepherd: Processing group "${group.name}" with patterns:`, group.patterns);
     console.log('Tab Shepherd: Current bindings:', bindings);
@@ -475,8 +524,16 @@ async function sortAllTabs() {
         // Only move if the group has an assigned window
         if (targetWindowId) {
           if (targetWindowId !== currentTab.windowId) {
+            // Guard: don't move the last tab out of a window
+            const sourceTabs = await chrome.tabs.query({ windowId: currentTab.windowId });
+            if (sourceTabs.length <= 1) {
+              console.log('Tab Shepherd: Skipping move — would empty source window');
+              continue;
+            }
             await chrome.tabs.move(tab.id, { windowId: targetWindowId, index: -1 });
             movedCount++;
+            // Re-fetch bindings after move (window state may have changed)
+            bindings = await getWindowBindings();
             console.log(`Tab Shepherd: Moved tab to "${group.name}" window`);
           }
           await addTabToExistingChromeGroup(tab.id, targetWindowId, group.name);
@@ -485,6 +542,11 @@ async function sortAllTabs() {
       } catch (e) {
         errors.push(`Failed to move tab "${tab.title}": ${e.message}`);
       }
+    }
+
+    // Re-fetch windows for next group iteration (tabs may have moved)
+    if (tabsToMove.length > 0) {
+      windows = await chrome.windows.getAll({ populate: true });
     }
   }
 
@@ -781,5 +843,5 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 // Also rebind when service worker wakes up (in case of extension reload)
 (async () => {
   console.log('Tab Shepherd: Service worker started');
-  windowBindings = await getWindowBindings();
+  await getWindowBindings(); // Warm up the cache
 })();
