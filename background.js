@@ -7,17 +7,6 @@ const DEFAULT_CONFIG = {
   catchAllWindowId: null
 };
 
-// Unique prefix marker so we can recognise and strip our own title prefix
-// before pattern-matching (prevents [🐑Group-A] from triggering Group-A rules).
-const TITLE_PREFIX_START = '[🐑';
-const TITLE_PREFIX_END   = '] ';
-const TITLE_PREFIX_REGEX = /^\[🐑.+?\] /;
-
-function stripTitlePrefix(title) {
-  if (!title) return title;
-  return title.replace(TITLE_PREFIX_REGEX, '');
-}
-
 // In-memory caches — eliminates ~90 storage reads per page load
 let cachedConfig = null;
 let cachedBindings = null;
@@ -108,20 +97,18 @@ function matchesPattern(text, pattern, isSimpleMode = false) {
 
 function tabMatchesGroup(url, title, group) {
   const isSimple = group.mode === 'simple';
-  const cleanTitle = stripTitlePrefix(title);
   // Check if URL or title matches any pattern in the group
   return group.patterns.some(pattern =>
-    matchesPattern(url, pattern, isSimple) || matchesPattern(cleanTitle, pattern, isSimple)
+    matchesPattern(url, pattern, isSimple) || matchesPattern(title, pattern, isSimple)
   );
 }
 
 // Returns match info: { group, matchType: 'title' | 'url' | null }
 function getMatchInfo(url, title, group) {
   const isSimple = group.mode === 'simple';
-  const cleanTitle = stripTitlePrefix(title);
 
   // Check title first (higher priority)
-  const titleMatches = group.patterns.some(pattern => matchesPattern(cleanTitle, pattern, isSimple));
+  const titleMatches = group.patterns.some(pattern => matchesPattern(title, pattern, isSimple));
   if (titleMatches) {
     return { group, matchType: 'title' };
   }
@@ -278,46 +265,6 @@ async function rebindWindowsOnStartup() {
 }
 
 // ============================================================================
-// Title Prefix Injection
-// ============================================================================
-
-async function applyTitlePrefix(tabId, groupName) {
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      func: (prefix) => {
-        // The 🐑 marker lets us recognise our own prefix and strip it before
-        // pattern-matching, preventing the prefix itself from triggering group rules.
-        const MARKER = '🐑';
-        const strip = (t) => t.replace(new RegExp(`^\\[${MARKER}.+?\\] `), '');
-        const fullPrefix = `[${MARKER}${prefix}] `;
-
-        document.title = fullPrefix + strip(document.title);
-
-        // Disconnect any previous observer before creating a new one
-        if (window.__tabShepherdObserver) {
-          window.__tabShepherdObserver.disconnect();
-        }
-
-        const titleEl = document.querySelector('title');
-        if (titleEl) {
-          window.__tabShepherdObserver = new MutationObserver(() => {
-            if (!document.title.startsWith(fullPrefix)) {
-              document.title = fullPrefix + strip(document.title);
-            }
-          });
-          window.__tabShepherdObserver.observe(titleEl, { childList: true });
-        }
-      },
-      args: [groupName]
-    });
-  } catch (e) {
-    // Tab may not be scriptable (chrome://, PDFs, etc.)
-    console.log(`Tab Shepherd: Could not prefix title for tab ${tabId}:`, e.message);
-  }
-}
-
-// ============================================================================
 // Tab Event Handlers
 // ============================================================================
 
@@ -338,7 +285,6 @@ async function handleTabNavigation(tabId, url, title, currentWindowId) {
     // If tab is already in the correct window, just ensure it's in the Chrome tab group
     if (currentWindowGroup === matchingGroup.name) {
       await addTabToExistingChromeGroup(tabId, currentWindowId, matchingGroup.name);
-      await applyTitlePrefix(tabId, matchingGroup.name);
       return;
     }
 
@@ -348,7 +294,6 @@ async function handleTabNavigation(tabId, url, title, currentWindowId) {
     if (targetWindowId && targetWindowId !== currentWindowId) {
       // Move tab to existing assigned window and add to Chrome tab group
       await moveTabToWindow(tabId, targetWindowId, matchingGroup.name);
-      await applyTitlePrefix(tabId, matchingGroup.name);
       console.log(`Tab Shepherd: Moved tab to "${matchingGroup.name}" window (matched URL or title)`);
     }
     // If no window is assigned to this group, leave the tab where it is
@@ -368,61 +313,10 @@ async function handleTabNavigation(tabId, url, title, currentWindowId) {
   }
 }
 
-// Per-tab debounce map for title-change prefix refresh
-const pendingTitleDebounce = new Map();
-
-// Listen for tab URL or title changes
+// Listen for tab URL changes (the primary routing signal)
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  // URL change → route immediately (this is the primary navigation signal)
   if (changeInfo.url) {
-    // Clear any pending title debounce — URL change supersedes it
-    if (pendingTitleDebounce.has(tabId)) {
-      clearTimeout(pendingTitleDebounce.get(tabId));
-      pendingTitleDebounce.delete(tabId);
-    }
     await handleTabNavigation(tabId, tab.url, tab.title, tab.windowId);
-  }
-
-  // Title change → only re-apply prefix (no routing), debounced 150ms
-  // This breaks the feedback loop: title changes no longer trigger group matching
-  if (changeInfo.title && !changeInfo.url) {
-    if (pendingTitleDebounce.has(tabId)) {
-      clearTimeout(pendingTitleDebounce.get(tabId));
-    }
-    pendingTitleDebounce.set(tabId, setTimeout(async () => {
-      pendingTitleDebounce.delete(tabId);
-      const bindings = await getWindowBindings();
-      const groupName = bindings[tab.windowId];
-      if (groupName) {
-        await applyTitlePrefix(tabId, groupName);
-      }
-    }, 150));
-  }
-
-  // Re-apply prefix after full page load — navigation destroys the MutationObserver
-  if (changeInfo.status === 'complete' && tab.url &&
-      !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
-    const bindings = await getWindowBindings();
-    const groupName = bindings[tab.windowId];
-    if (groupName) {
-      await applyTitlePrefix(tabId, groupName);
-    }
-  }
-});
-
-// Re-apply prefix whenever the user switches tabs (active tab = window menu entry)
-chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
-  const bindings = await getWindowBindings();
-  const groupName = bindings[windowId];
-  if (!groupName) return;
-  try {
-    const tab = await chrome.tabs.get(tabId);
-    if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) return;
-    // Skip if already prefixed — avoids redundant script injection on every tab switch
-    if (tab.title && TITLE_PREFIX_REGEX.test(tab.title)) return;
-    await applyTitlePrefix(tabId, groupName);
-  } catch (e) {
-    // Tab may have been closed
   }
 });
 
@@ -678,16 +572,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             for (const pattern of patterns) {
               if (!pattern.trim()) continue;
               try {
-                const cleanTabTitle = stripTitlePrefix(tab.title);
                 if (isSimpleMode) {
                   // Simple "contains" mode (case-insensitive)
                   const lowerPattern = pattern.toLowerCase();
                   matches = (tab.url && tab.url.toLowerCase().includes(lowerPattern)) ||
-                            (cleanTabTitle && cleanTabTitle.toLowerCase().includes(lowerPattern));
+                            (tab.title && tab.title.toLowerCase().includes(lowerPattern));
                 } else {
                   // Regex mode
                   const regex = new RegExp(pattern, 'i');
-                  matches = regex.test(tab.url) || regex.test(cleanTabTitle || '');
+                  matches = regex.test(tab.url) || regex.test(tab.title || '');
                 }
                 if (matches) break;
               } catch (e) {
