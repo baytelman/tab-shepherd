@@ -95,59 +95,24 @@ function matchesPattern(text, pattern, isSimpleMode = false) {
   }
 }
 
-function tabMatchesGroup(url, title, group) {
+function tabMatchesGroup(url, group) {
   const isSimple = group.mode === 'simple';
-  // Check if URL or title matches any pattern in the group
-  return group.patterns.some(pattern =>
-    matchesPattern(url, pattern, isSimple) || matchesPattern(title, pattern, isSimple)
-  );
+  return group.patterns.some(pattern => matchesPattern(url, pattern, isSimple));
 }
 
-// Returns match info: { group, matchType: 'title' | 'url' | null }
-function getMatchInfo(url, title, group) {
-  const isSimple = group.mode === 'simple';
-
-  // Check title first (higher priority)
-  const titleMatches = group.patterns.some(pattern => matchesPattern(title, pattern, isSimple));
-  if (titleMatches) {
-    return { group, matchType: 'title' };
-  }
-
-  // Then check URL
-  const urlMatches = group.patterns.some(pattern => matchesPattern(url, pattern, isSimple));
-  if (urlMatches) {
-    return { group, matchType: 'url' };
-  }
-
-  return null;
-}
-
-function findMatchingGroup(url, title, config) {
+// Returns the first matching group by priority order (lowest priority number wins).
+// Matches URL only — title matching was removed along with the title-prefix feature.
+function findMatchingGroup(url, config) {
   if (!config.enabled) return null;
 
-  // Collect all matching groups with their match type
-  const matches = [];
-  for (const group of config.groups) {
-    const matchInfo = getMatchInfo(url, title, group);
-    if (matchInfo) {
-      matches.push(matchInfo);
+  // Groups are stored in user-defined order; sort by priority for deterministic results
+  const sorted = [...config.groups].sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
+  for (const group of sorted) {
+    if (tabMatchesGroup(url, group)) {
+      return group;
     }
   }
-
-  if (matches.length === 0) return null;
-
-  // Sort matches:
-  // 1. Title matches before URL matches
-  // 2. Alphabetically by group name if same match type
-  matches.sort((a, b) => {
-    // Title matches have priority over URL matches
-    if (a.matchType === 'title' && b.matchType === 'url') return -1;
-    if (a.matchType === 'url' && b.matchType === 'title') return 1;
-    // Same match type: sort alphabetically by group name
-    return a.group.name.localeCompare(b.group.name);
-  });
-
-  return matches[0].group;
+  return null;
 }
 
 // ============================================================================
@@ -247,9 +212,9 @@ async function rebindWindowsOnStartup() {
       if (Object.values(newBindings).includes(group.name)) continue;
       if (newBindings[window.id]) continue;
 
-      // Check if any tab in this window matches the group (by URL or title)
+      // Check if any tab in this window matches the group by URL
       const hasMatchingTab = window.tabs?.some(tab =>
-        tab.url && tabMatchesGroup(tab.url, tab.title, group)
+        tab.url && tabMatchesGroup(tab.url, group)
       );
 
       if (hasMatchingTab) {
@@ -268,7 +233,7 @@ async function rebindWindowsOnStartup() {
 // Tab Event Handlers
 // ============================================================================
 
-async function handleTabNavigation(tabId, url, title, currentWindowId) {
+async function handleTabNavigation(tabId, url, currentWindowId) {
   const config = await getConfig();
   if (!config.enabled) return;
 
@@ -277,7 +242,7 @@ async function handleTabNavigation(tabId, url, title, currentWindowId) {
     return;
   }
 
-  const matchingGroup = findMatchingGroup(url, title, config);
+  const matchingGroup = findMatchingGroup(url, config);
   const bindings = await getWindowBindings();
   const currentWindowGroup = bindings[currentWindowId];
 
@@ -316,7 +281,7 @@ async function handleTabNavigation(tabId, url, title, currentWindowId) {
 // Listen for tab URL changes (the primary routing signal)
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.url) {
-    await handleTabNavigation(tabId, tab.url, tab.title, tab.windowId);
+    await handleTabNavigation(tabId, tab.url, tab.windowId);
   }
 });
 
@@ -324,7 +289,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 chrome.tabs.onCreated.addListener(async (tab) => {
   // New tabs often start with chrome://newtab, wait for actual navigation
   if (tab.pendingUrl && !tab.pendingUrl.startsWith('chrome://')) {
-    await handleTabNavigation(tab.id, tab.pendingUrl, tab.title, tab.windowId);
+    await handleTabNavigation(tab.id, tab.pendingUrl, tab.windowId);
   }
 });
 
@@ -374,7 +339,7 @@ async function sortAllTabs() {
         }
 
         // Check if this tab matches the current group
-        const matches = tabMatchesGroup(tab.url, tab.title, group);
+        const matches = tabMatchesGroup(tab.url, group);
         if (!matches) continue;
 
         console.log(`Tab Shepherd: Tab matches "${group.name}":`, { url: tab.url, title: tab.title, windowId: window.id });
