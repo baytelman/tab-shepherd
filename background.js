@@ -95,24 +95,48 @@ function matchesPattern(text, pattern, isSimpleMode = false) {
   }
 }
 
-function tabMatchesGroup(url, group) {
+function tabMatchesGroup(url, title, group) {
   const isSimple = group.mode === 'simple';
-  return group.patterns.some(pattern => matchesPattern(url, pattern, isSimple));
+  return group.patterns.some(pattern =>
+    matchesPattern(url, pattern, isSimple) || matchesPattern(title, pattern, isSimple)
+  );
 }
 
-// Returns the first matching group by priority order (lowest priority number wins).
-// Matches URL only — title matching was removed along with the title-prefix feature.
-function findMatchingGroup(url, config) {
+// Returns the best matching group.
+// Strategy: collect all groups whose patterns match the URL or title, then pick
+// the most specific one. A title-only match is more specific than a URL-only
+// match (e.g. "[artemis-6]" in the title disambiguates a generic github URL).
+// Within the same specificity tier, priority order wins.
+function findMatchingGroup(url, title, config) {
   if (!config.enabled) return null;
 
-  // Groups are stored in user-defined order; sort by priority for deterministic results
   const sorted = [...config.groups].sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
+
+  let bestMatch = null;
+  let bestHasTitle = false;
+
   for (const group of sorted) {
-    if (tabMatchesGroup(url, group)) {
-      return group;
+    const isSimple = group.mode === 'simple';
+    const urlMatch = group.patterns.some(p => matchesPattern(url, p, isSimple));
+    const titleMatch = title && group.patterns.some(p => matchesPattern(title, p, isSimple));
+
+    if (!urlMatch && !titleMatch) continue;
+
+    const hasTitle = !!titleMatch;
+
+    if (!bestMatch) {
+      // First match — take it
+      bestMatch = group;
+      bestHasTitle = hasTitle;
+    } else if (hasTitle && !bestHasTitle) {
+      // This match has a title hit; the current best doesn't → more specific
+      bestMatch = group;
+      bestHasTitle = hasTitle;
     }
+    // Otherwise keep the existing bestMatch (higher priority already won)
   }
-  return null;
+
+  return bestMatch;
 }
 
 // ============================================================================
@@ -212,9 +236,9 @@ async function rebindWindowsOnStartup() {
       if (Object.values(newBindings).includes(group.name)) continue;
       if (newBindings[window.id]) continue;
 
-      // Check if any tab in this window matches the group by URL
+      // Check if any tab in this window matches the group
       const hasMatchingTab = window.tabs?.some(tab =>
-        tab.url && tabMatchesGroup(tab.url, group)
+        tab.url && tabMatchesGroup(tab.url, tab.title, group)
       );
 
       if (hasMatchingTab) {
@@ -233,7 +257,7 @@ async function rebindWindowsOnStartup() {
 // Tab Event Handlers
 // ============================================================================
 
-async function handleTabNavigation(tabId, url, currentWindowId) {
+async function handleTabNavigation(tabId, url, title, currentWindowId) {
   const config = await getConfig();
   if (!config.enabled) return;
 
@@ -242,7 +266,7 @@ async function handleTabNavigation(tabId, url, currentWindowId) {
     return;
   }
 
-  const matchingGroup = findMatchingGroup(url, config);
+  const matchingGroup = findMatchingGroup(url, title, config);
   const bindings = await getWindowBindings();
   const currentWindowGroup = bindings[currentWindowId];
 
@@ -281,7 +305,7 @@ async function handleTabNavigation(tabId, url, currentWindowId) {
 // Listen for tab URL changes (the primary routing signal)
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.url) {
-    await handleTabNavigation(tabId, tab.url, tab.windowId);
+    await handleTabNavigation(tabId, tab.url, tab.title, tab.windowId);
   }
 });
 
@@ -289,7 +313,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 chrome.tabs.onCreated.addListener(async (tab) => {
   // New tabs often start with chrome://newtab, wait for actual navigation
   if (tab.pendingUrl && !tab.pendingUrl.startsWith('chrome://')) {
-    await handleTabNavigation(tab.id, tab.pendingUrl, tab.windowId);
+    await handleTabNavigation(tab.id, tab.pendingUrl, tab.title, tab.windowId);
   }
 });
 
@@ -339,7 +363,7 @@ async function sortAllTabs() {
         }
 
         // Check if this tab matches the current group
-        const matches = tabMatchesGroup(tab.url, group);
+        const matches = tabMatchesGroup(tab.url, tab.title, group);
         if (!matches) continue;
 
         console.log(`Tab Shepherd: Tab matches "${group.name}":`, { url: tab.url, title: tab.title, windowId: window.id });
