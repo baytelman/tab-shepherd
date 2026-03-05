@@ -302,18 +302,20 @@ async function handleTabNavigation(tabId, url, title, currentWindowId) {
   }
 }
 
-// Listen for tab URL changes (the primary routing signal)
+// Listen for tab updates — route on URL change or when page finishes loading
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  if (changeInfo.url) {
-    await handleTabNavigation(tabId, tab.url, tab.title, tab.windowId);
+  if (changeInfo.url || changeInfo.status === 'complete') {
+    if (tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
+      await handleTabNavigation(tabId, tab.url, tab.title, tab.windowId);
+    }
   }
 });
 
 // Listen for new tabs
 chrome.tabs.onCreated.addListener(async (tab) => {
-  // New tabs often start with chrome://newtab, wait for actual navigation
-  if (tab.pendingUrl && !tab.pendingUrl.startsWith('chrome://')) {
-    await handleTabNavigation(tab.id, tab.pendingUrl, tab.title, tab.windowId);
+  const url = tab.pendingUrl || tab.url;
+  if (url && !url.startsWith('chrome://') && !url.startsWith('chrome-extension://')) {
+    await handleTabNavigation(tab.id, url, tab.title, tab.windowId);
   }
 });
 
