@@ -103,40 +103,32 @@ function tabMatchesGroup(url, title, group) {
 }
 
 // Returns the best matching group.
-// Strategy: collect all groups whose patterns match the URL or title, then pick
-// the most specific one. A title-only match is more specific than a URL-only
-// match (e.g. "[artemis-6]" in the title disambiguates a generic github URL).
-// Within the same specificity tier, priority order wins.
+// Specificity tiers (highest wins):
+//   1. Group NAME found in the title (e.g. "[artemis-4]" in title → group "artemis-4")
+//   2. Group pattern matches URL or title, resolved by priority order
 function findMatchingGroup(url, title, config) {
   if (!config.enabled) return null;
 
-  const sorted = [...config.groups].sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
-
-  let bestMatch = null;
-  let bestHasTitle = false;
-
-  for (const group of sorted) {
-    const isSimple = group.mode === 'simple';
-    const urlMatch = group.patterns.some(p => matchesPattern(url, p, isSimple));
-    const titleMatch = title && group.patterns.some(p => matchesPattern(title, p, isSimple));
-
-    if (!urlMatch && !titleMatch) continue;
-
-    const hasTitle = !!titleMatch;
-
-    if (!bestMatch) {
-      // First match — take it
-      bestMatch = group;
-      bestHasTitle = hasTitle;
-    } else if (hasTitle && !bestHasTitle) {
-      // This match has a title hit; the current best doesn't → more specific
-      bestMatch = group;
-      bestHasTitle = hasTitle;
+  // Tier 1: check if any group's name appears directly in the title.
+  // This is the strongest signal (e.g. PR titles like "[artemis-4] feat: ...")
+  if (title) {
+    const lowerTitle = title.toLowerCase();
+    for (const group of config.groups) {
+      if (lowerTitle.includes(group.name.toLowerCase())) {
+        return group;
+      }
     }
-    // Otherwise keep the existing bestMatch (higher priority already won)
   }
 
-  return bestMatch;
+  // Tier 2: pattern-based matching, first match by priority wins
+  const sorted = [...config.groups].sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
+  for (const group of sorted) {
+    if (tabMatchesGroup(url, title, group)) {
+      return group;
+    }
+  }
+
+  return null;
 }
 
 // ============================================================================
